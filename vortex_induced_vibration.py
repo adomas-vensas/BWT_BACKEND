@@ -12,13 +12,6 @@ from tqdm import tqdm
 from calculations import dyn, ib, lbm, mrt, post
 import matplotlib.pyplot as plt
 import matplotlib as mpl
-from fastapi import FastAPI, WebSocket
-from fastapi.responses import ORJSONResponse
-from pydantic import BaseModel
-from fastapi.encoders import jsonable_encoder
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.gzip import GZipMiddleware
-import asyncio
 
 # ============================= plot options =======================
 
@@ -222,45 +215,18 @@ if PLOT:
 #         circle.center = ((X_OBJ + d[0]) / D, (Y_OBJ + d[1]) / D)        
 #         plt.pause(0.01)
 
-app = FastAPI()
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"], allow_credentials=True)
-app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-@app.get("/params")
-async def get_params():
-    return {
-        "NX": NX,
-        "NY": NY,
-
-        "RE": RE,
-        "UR": UR,
-        "MR": MR,
-        "DR": DR,
-        "D_PHYSICAL": D_PHYSICAL
-    }
-
-@app.websocket("/ws/stream")
-async def stream(ws: WebSocket):
-    await ws.accept()
+def updatePublic():
     global f, d, v, a, h
-    # Run until client disconnects
-    try:
-        while True:
-            f, rho, u, d, v, a, h = update(f, d, v, a, h)
-
-            d0 = jax.device_get(d[0] / D).astype(jnp.float32)
-            d1 = jax.device_get(d[1] / D).astype(jnp.float32)
-
-            curlT = post.calculate_curl(u).T
-            u_host = jax.device_get(curlT)
-
-            payload = d0.tobytes() + d1.tobytes() + u_host.tobytes()
-            await ws.send_bytes(payload)
-            await asyncio.sleep(0.001)
-    except Exception:
-        await ws.close()
+    f, rho, u, d, v, a, h = update(f, d, v, a, h)
+    
+    return f, rho, u, d, v, a, h
 
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("vortex_induced_vibration:app", host="0.0.0.0", port=8000, reload=True)
+
+
+
+
+
+
+
