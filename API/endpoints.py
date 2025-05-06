@@ -27,13 +27,13 @@ async def set_params(params: CalculationParamsRequest):
         vortex_induced_vibration.UR = params.reducedVelocity
 
     if params.dampingRatio is not None:
-        vortex_induced_vibration.UR = params.dampingRatio
+        vortex_induced_vibration.DR = params.dampingRatio
 
     if params.windSpeed is not None:
-        vortex_induced_vibration.U0 = params.windSpeed
+        vortex_induced_vibration.U_PHYSICAL = params.windSpeed
     
     if params.cylinderDiameter is not None:
-        vortex_induced_vibration.D = params.cylinderDiameter
-
-    return
-
+        vortex_induced_vibration.D_PHYSICAL = params.cylinderDiameter
+    
+    if params.massRatio is not None:
+        vortex_induced_vibration.MR = params.massRatio

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, WebSocket
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import asyncio
 import jax
 import jax.numpy as jnp
@@ -10,7 +10,7 @@ router = APIRouter(prefix="/stream")
 @router.websocket("/calculate")
 async def stream(ws: WebSocket):
     await ws.accept()
-    
+
     try:
         while True:
             f, rho, u, d, v, a, h = vortex_induced_vibration.updatePublic()
@@ -24,5 +24,8 @@ async def stream(ws: WebSocket):
             payload = d0.tobytes() + d1.tobytes() + u_host.tobytes()
             await ws.send_bytes(payload)
             await asyncio.sleep(0.001)
-    except Exception:
-        await ws.close()
+    except Exception as e:
+        print(e)
+    finally:
+        if ws.client_state.name == "DISCONNECTED":
+            await ws.close()

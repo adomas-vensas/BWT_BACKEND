@@ -28,7 +28,7 @@ U_MAX_PHYSICAL = 15 # physical velocity in m/s
 U_MAX_LATTICE = 0.3 # lattice points
 
 D_PHYSICAL = 0.5 # physical diameter in m
-U_PHYSICAL = 10 # physical velocity in m/s
+U_PHYSICAL = 7.5 # physical velocity in m/s
 
 #15 - 0.3
 #7.5 - x

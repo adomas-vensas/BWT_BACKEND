@@ -6,6 +6,7 @@ class CalculationParamsRequest(BaseModel):
     dampingRatio: float | None = None
     windSpeed: float | None = None
     cylinderDiameter: float | None = None
+    massRatio: float | None = None
 
     
 
