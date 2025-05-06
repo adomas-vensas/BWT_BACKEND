@@ -219,7 +219,7 @@ if PLOT:
 def updatePublic():
     global f, d, v, a, h
     f, rho, u, d, v, a, h = update(f, d, v, a, h)
-    
+
     return f, rho, u, d, v, a, h
 
 
