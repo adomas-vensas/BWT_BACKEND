@@ -13,220 +13,212 @@ from calculations import dyn, ib, lbm, mrt, post
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 
-# ============================= plot options =======================
 
-PLOT = True
-PLOT_EVERY = 100
-PLOT_AFTER = 0
+class VortexSimulation:
+    def __init__(self, D, U0, RE, UR, MR, DR, NX, NY, PLOT=False):
+        # ===== Plot Settings =====
+        self.PLOT = PLOT
+        self.PLOT_EVERY = 100
+        self.PLOT_AFTER = 0
 
-# ====================== Configuration ======================
+        # ===== Configuration =====
 
-D_MAX_PHYSICAL = 1 # physical diameter in m
-D_MAX_LATTICE = 15 # lattice points
+        self.D = D
+        self.U0 = U0
 
-U_MAX_PHYSICAL = 15 # physical velocity in m/s
-U_MAX_LATTICE = 0.3 # lattice points
+        self.RE = RE
+        self.UR = UR
+        self.MR = MR
+        self.DR = DR
 
-D_PHYSICAL = 0.5 # physical diameter in m
-U_PHYSICAL = 7.5 # physical velocity in m/s
+        self.NX = NX
+        self.NY = NY
 
-#15 - 0.3
-#7.5 - x
-D = (D_MAX_LATTICE * D_PHYSICAL) / D_MAX_PHYSICAL # Cylinder diameter unitless
-U0 = (U_MAX_LATTICE * U_PHYSICAL) / U_MAX_PHYSICAL # Inlet velocity unitless
+        self.X_OBJ = self.NX / 2
+        self.Y_OBJ = self.NY / 2
 
+        self.N_MARKER = int(4 * self.D)
+        self.N_ITER_MDF = 3
+        self.IB_MARGIN = 2
 
-# Simulation parameters
-# D = 24                 # Cylinder diameter
-# U0 =                  # Inlet velocity
-TM = 60000             # Total time steps
+        self.FN = self.U0 / (self.UR * self.D)
+        self.MASS = math.pi * (self.D / 2) ** 2 * self.MR
+        self.STIFFNESS = (self.FN * 2 * math.pi) ** 2 * self.MASS * (1 + 1 / self.MR)
+        self.DAMPING = 2 * math.sqrt(self.STIFFNESS * self.MASS) * self.DR
 
-# Domain size
-NX = int(20 * D)            # Grid points in x direction
-NY = int(10 * D)            # Grid points in y direction
+        self.NU = self.U0 * self.D / self.RE
+        self.TAU = 3 * self.NU + 0.5
+        self.OMEGA = 1 / self.TAU
+        self.MRT_COL_LEFT, self.MRT_SRC_LEFT = mrt.precompute_left_matrices(self.OMEGA)
 
-# Cylinder position
-X_OBJ = NX / 2          # Cylinder x position
-Y_OBJ = NY / 2          # Cylinder y position
+        self.X, self.Y = jnp.meshgrid(jnp.arange(self.NX), jnp.arange(self.NY), indexing="ij")
 
-# IB method parameters
-N_MARKER = int(4 * D)       # Number of markers on cylinder
-N_ITER_MDF = 3         # Multi-direct forcing iterations
-IB_MARGIN = 2          # Margin of the IB region to the cylinder
+        self.THETA_MARKERS = jnp.linspace(0, jnp.pi * 2, self.N_MARKER, endpoint=False, dtype=jnp.float32)
+        self.X_MARKERS = self.X_OBJ + 0.5 * self.D * jnp.cos(self.THETA_MARKERS)
+        self.Y_MARKERS = self.Y_OBJ + 0.5 * self.D * jnp.sin(self.THETA_MARKERS)
+        self.L_ARC = self.D * math.pi / self.N_MARKER
 
-# Physical parameters
-RE = 150               # Reynolds number
-UR = 5                 # Reduced velocity
-MR = 10                # Mass ratio
-DR = 0                 # Damping ratio
+        self.IB_START_X = int(self.X_OBJ - 0.5 * self.D - self.IB_MARGIN)
+        self.IB_START_Y = int(self.Y_OBJ - 0.5 * self.D - self.IB_MARGIN)
+        self.IB_SIZE = int(self.D + self.IB_MARGIN * 2)
 
-# =================== Pre-calculations ==================
+        # ====== Variables ======
+        self.rho = jnp.ones((self.NX, self.NY), dtype=jnp.float32)
+        self.u = jnp.zeros((2, self.NX, self.NY), dtype=jnp.float32)
+        self.f = jnp.zeros((9, self.NX, self.NY), dtype=jnp.float32)
+        self.feq = jnp.zeros((9, self.NX, self.NY), dtype=jnp.float32)
 
-# structural parameters
-FN = U0 / (UR * D)                                          # Natural frequency
-MASS = math.pi * (D / 2) ** 2 * MR                          # Mass of the cylinder
-STIFFNESS = (FN * 2 * math.pi) ** 2 * MASS * (1 + 1 / MR)   # Stiffness of the spring
-DAMPING = 2 * math.sqrt(STIFFNESS * MASS) * DR              # Damping of the spring
+        self.d = jnp.zeros((2,), dtype=jnp.float32)
+        self.v = jnp.zeros((2,), dtype=jnp.float32).at[1].set(1e-2)
+        self.a = jnp.zeros((2,), dtype=jnp.float32)
+        self.h = jnp.zeros((2,), dtype=jnp.float32)
 
-# fluid parameters
-NU = U0 * D / RE                                            # Kinematic viscosity
-TAU = 3 * NU + 0.5                                          # Relaxation time
-OMEGA = 1 / TAU                                             # Relaxation parameter
-MRT_COL_LEFT, MRT_SRC_LEFT = mrt.precompute_left_matrices(OMEGA)
+        self.u = self.u.at[0].set(self.U0)
+        self.f = lbm.get_equilibrium(self.rho, self.u)
+        self.feq_init = self.f[:, 0, 0]
 
-# eulerian meshgrid
-X, Y = jnp.meshgrid(jnp.arange(NX, dtype=jnp.int32), 
-                    jnp.arange(NY, dtype=jnp.int32), 
-                    indexing="ij")
-
-# lagrangian markers
-THETA_MAKERS = jnp.linspace(0, jnp.pi * 2, N_MARKER, dtype=jnp.float32, endpoint=False)
-X_MARKERS = X_OBJ + 0.5 * D * jnp.cos(THETA_MAKERS)
-Y_MARKERS = Y_OBJ + 0.5 * D * jnp.sin(THETA_MAKERS)
-L_ARC = D * math.pi / N_MARKER
-
-# dynamic ibm region
-IB_START_X = int(X_OBJ - 0.5 * D - IB_MARGIN)
-IB_START_Y = int(Y_OBJ - 0.5 * D - IB_MARGIN)
-IB_SIZE = int(D + IB_MARGIN * 2)
-
-# =================== define variables ==================
-
-# fluid variables
-rho = jnp.ones((NX, NY), dtype=jnp.float32)      # density of fluid
-u = jnp.zeros((2, NX, NY), dtype=jnp.float32)    # velocity of fluid
-f = jnp.zeros((9, NX, NY), dtype=jnp.float32)    # distribution functions
-feq = jnp.zeros((9, NX, NY), dtype=jnp.float32)  # equilibrium distribution functions
-
-# structural variables
-d = jnp.zeros((2), dtype=jnp.float32)   # displacement of cylinder
-v = jnp.zeros((2), dtype=jnp.float32)   # velocity of cylinder
-a = jnp.zeros((2), dtype=jnp.float32)   # acceleration of cylinder
-h = jnp.zeros((2), dtype=jnp.float32)   # hydrodynamic force
-
-# initial conditions
-u = u.at[0].set(U0)
-f = lbm.get_equilibrium(rho, u)
-v = d.at[1].set(1e-2)  # add an initial velocity to the cylinder
-feq_init = f[:,0,0]
+        if self.PLOT:
+            self.setup_plot()
 
 
-# =================== define calculation routine ===================
+    @staticmethod
+    def update(
+        f: jnp.ndarray,
+        d: jnp.ndarray,
+        v: jnp.ndarray,
+        a: jnp.ndarray,
+        h: jnp.ndarray,
+        X_MARKERS: jnp.ndarray,
+        Y_MARKERS: jnp.ndarray,
+        N_MARKER: int,
+        L_ARC: float,
+        MRT_COL_LEFT: jnp.ndarray,
+        MRT_SRC_LEFT: jnp.ndarray,
+        N_ITER_MDF: int,
+        IB_START_X: int,
+        IB_START_Y: int,
+        IB_SIZE: int,
+        MASS: float,
+        STIFFNESS: float,
+        DAMPING: float,
+        feq_init: jnp.ndarray,
+        U0: float,
+        D: float,
+        X: jnp.ndarray,
+        Y: jnp.ndarray,
+    ):
+        """
+        JIT-compiled update function for the VortexSimulation class.
+        """
+        # Update macroscopic variables
+        rho, u = lbm.get_macroscopic(f)
 
-j = -1
-@jax.jit
-def update(f, d, v, a, h):
-    global j
-    j += 1
-   
-    # update new macroscopic
-    rho, u = lbm.get_macroscopic(f)
+        # Collision step
+        feq = lbm.get_equilibrium(rho, u)
+        f = mrt.collision(f, feq, MRT_COL_LEFT)
 
-    
-    # Collision
-    feq = lbm.get_equilibrium(rho, u)
-    f = mrt.collision(f, feq, MRT_COL_LEFT)
-      
-    # update markers position
-    x_markers, y_markers = ib.get_markers_coords_2dof(X_MARKERS, Y_MARKERS, d)
-    
-    # update ibm region
-    ib_start_x = (IB_START_X + d[0]).astype(jnp.int32)
-    ib_start_y = (IB_START_Y + d[1]).astype(jnp.int32)
-    
-    # extract data from ibm region
-    u_slice = jax.lax.dynamic_slice(u, (0, ib_start_x, ib_start_y), (2, IB_SIZE, IB_SIZE))
-    X_slice = jax.lax.dynamic_slice(X, (ib_start_x, ib_start_y), (IB_SIZE, IB_SIZE))
-    Y_slice = jax.lax.dynamic_slice(Y, (ib_start_x, ib_start_y), (IB_SIZE, IB_SIZE))
-    f_slice = jax.lax.dynamic_slice(f, (0, ib_start_x, ib_start_y), (9, IB_SIZE, IB_SIZE))
-    
+        # Marker coordinates update
+        x_markers, y_markers = ib.get_markers_coords_2dof(X_MARKERS, Y_MARKERS, d)
 
-    v_markers = jnp.tile(v.reshape((1, 2)), (N_MARKER, 1))
-    # calculate ibm force
-    g_slice, h_markers = ib.multi_direct_forcing(u_slice, X_slice, Y_slice, 
-                                                   v_markers, x_markers, y_markers, N_MARKER, L_ARC, 
-                                                   N_ITER_MDF, ib.kernel_range4)
-    
-    # apply the force to the lattice
-    g_lattice = lbm.get_discretized_force(g_slice, u_slice)
-    s_slice = mrt.get_source(g_lattice, MRT_SRC_LEFT)    
-    # f = dynamic_update_slice(f, f_slice + s_slice, (0, ib_start_x, ib_start_y))
-    f = jax.lax.dynamic_update_slice(f, f_slice + s_slice, (0, ib_start_x, ib_start_y))
+        # Determine slicing start positions
+        ib_start_x = (IB_START_X + d[0]).astype(jnp.int32)
+        ib_start_y = (IB_START_Y + d[1]).astype(jnp.int32)
 
-    # apply the force to the cylinder
-    h = ib.get_force_to_obj(h_markers)
-    # h += a * math.pi * D ** 2 / 4   
-    scale = (math.pi  * D * D) / 4
-    h = jnp.add(h, jnp.multiply(a, scale))
-    a, v, d = dyn.newmark_2dof(a, v, d, h, MASS, STIFFNESS, DAMPING)
+        # Extract region of interest using IB_SIZE
+        u_slice = jax.lax.dynamic_slice(u, (0, ib_start_x, ib_start_y), (2, IB_SIZE, IB_SIZE))
+        X_slice = jax.lax.dynamic_slice(X, (ib_start_x, ib_start_y), (IB_SIZE, IB_SIZE))
+        Y_slice = jax.lax.dynamic_slice(Y, (ib_start_x, ib_start_y), (IB_SIZE, IB_SIZE))
+        f_slice = jax.lax.dynamic_slice(f, (0, ib_start_x, ib_start_y), (9, IB_SIZE, IB_SIZE))
+        
+        # Apply forcing
+        v_markers = jnp.tile(v.reshape((1, 2)), (N_MARKER, 1))
+        g_slice, h_markers = ib.multi_direct_forcing(
+            u_slice, X_slice, Y_slice, v_markers, x_markers, y_markers, N_MARKER, L_ARC, N_ITER_MDF, ib.kernel_range4
+        )
 
-    # Streaming
-    f = lbm.streaming(f)
+        # Update force
+        g_lattice = lbm.get_discretized_force(g_slice, u_slice)
+        s_slice = mrt.get_source(g_lattice, MRT_SRC_LEFT)
+        f = jax.lax.dynamic_update_slice(f, f_slice + s_slice, (0, ib_start_x, ib_start_y))
 
-    # Boundary conditions
-    f = lbm.boundary_equilibrium(f, feq_init[:,jnp.newaxis], loc='right')
-    f = lbm.velocity_boundary(f, U0, 0, loc='left')
-     
-    return f, rho, u, d, v, a, h
+        # Apply force to the cylinder
+        h = ib.get_force_to_obj(h_markers)
+        scale = (math.pi * D ** 2) / 4
+        h = jnp.add(h, jnp.multiply(a, scale))
+        a, v, d = dyn.newmark_2dof(a, v, d, h, MASS, STIFFNESS, DAMPING)
+
+        # Streaming and boundary conditions
+        f = lbm.streaming(f)
+        f = lbm.boundary_equilibrium(f, feq_init[:, jnp.newaxis], loc='right')
+        f = lbm.velocity_boundary(f, U0, 0, loc='left')
+
+        return f, rho, u, d, v, a, h
 
 
-# =============== create plot template ================
 
-if PLOT:
-    mpl.rcParams['figure.raise_window'] = False
-    
-    plt.figure(figsize=(8, 4))
-    
-    curl = post.calculate_curl(u)
-    im = plt.imshow(
-        curl.T,
-        extent=[0, NX/D, 0, NY/D],
-        cmap="seismic",
-        aspect="equal",
-        origin="lower",
-        norm=mpl.colors.CenteredNorm(),
-    )
+    def setup_plot(self):
+        mpl.rcParams['figure.raise_window'] = False
+        
+        plt.figure(figsize=(8, 4))
+        
+        curl = post.calculate_curl(self.u)
+        im = plt.imshow(
+            curl.T,
+            extent=[0, self.NX / self.D, 0, self.NY / self.D],
+            cmap="seismic",
+            aspect="equal",
+            origin="lower",
+            norm=mpl.colors.CenteredNorm(),
+        )
 
-    plt.colorbar()
-    plt.title(f"velocity {U0}; diameter: {D}")
-    plt.xlabel("x/D")
-    plt.ylabel("y/D")
+        plt.colorbar()
+        plt.title(f"velocity {self.U0}; diameter: {self.D}")
+        plt.xlabel("x/D")
+        plt.ylabel("y/D")
 
-    # draw a circle representing the cylinder
-    circle = plt.Circle(((X_OBJ + d[0]) / D, (Y_OBJ + d[1]) / D), 0.5, 
-                        edgecolor='black', linewidth=0.5,
-                        facecolor='white', fill=True)
-    plt.gca().add_artist(circle)
-    
-    # mark the initial position of the cylinder
-    plt.plot((X_OBJ + d[0]) / D, Y_OBJ / D, marker='+', markersize=10, color='k', linestyle='None', markeredgewidth=0.5)
-    
-    plt.tight_layout()
+        # draw a circle representing the cylinder
+        circle = plt.Circle(((self.X_OBJ + self.d[0]) / self.D, (self.Y_OBJ + self.d[1]) / self.D), 0.5, 
+                            edgecolor='black', linewidth=0.5,
+                            facecolor='white', fill=True)
+        plt.gca().add_artist(circle)
+        
+        # mark the initial position of the cylinder
+        plt.plot((self.X_OBJ + self.d[0]) / self.D, self.Y_OBJ / self.D, marker='+', markersize=10, color='k', linestyle='None', markeredgewidth=0.5)
+        
+        plt.tight_layout()
 
 # =============== start simulation ===============
 
-# for t in tqdm(range(TM)):
-#     f, rho, u, d, v, a, h = update(f, d, v, a, h)
+    def step(self):
 
+        jitted_update = jax.jit(
+            VortexSimulation.update,
+            static_argnums=(7, 8, 11, 12, 13, 14, 15, 16, 17)
+        )
 
-#     if PLOT and t % PLOT_EVERY == 0 and t > PLOT_AFTER:
-#         im.set_data(post.calculate_curl(u).T)
-#         im.autoscale()
-#         circle.center = ((X_OBJ + d[0]) / D, (Y_OBJ + d[1]) / D)        
-#         plt.pause(0.01)
+        (self.f, self.rho, self.u, self.d, self.v,
+        self.a, self.h) = jitted_update(
+            # 0–4 dynamic core state
+            self.f, self.d, self.v, self.a, self.h,
+            # 5–6 dynamic marker arrays
+            self.X_MARKERS, self.Y_MARKERS,
+            # 7–8 static
+            self.N_MARKER, self.L_ARC,
+            # 9–10 dynamic MRT arrays
+            self.MRT_COL_LEFT, self.MRT_SRC_LEFT,
+            # 11 static
+            self.N_ITER_MDF,
+            # 12–14 static grid ints
+            self.IB_START_X, self.IB_START_Y, self.IB_SIZE,
+            # 15–17 static floats
+            self.MASS, self.STIFFNESS, self.DAMPING,
+            # 18–22 dynamic arrays/floats
+            self.feq_init, self.U0, self.D, self.X, self.Y
+        )
 
-
-def updatePublic():
-    global f, d, v, a, h
-    f, rho, u, d, v, a, h = update(f, d, v, a, h)
-
-    return f, rho, u, d, v, a, h
-
-
-
-
-
-
-
-
-
+        # if self.PLOT and hasattr(self, "im"):
+        #     self.im.set_data(post.calculate_curl(self.u).T)
+        #     self.im.autoscale()
+        #     self.circle.center = ((self.X_OBJ + self.d[0]) / self.D, self.Y_OBJ / self.D)
+        #     plt.pause(0.01)
+        return self.f, self.rho, self.u, self.d, self.v, self.a, self.h
