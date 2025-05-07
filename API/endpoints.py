@@ -1,21 +1,12 @@
+import sys
+sys.path.append("..") 
+
+
 from fastapi import APIRouter, status
 from .DTOs.CalculationParamsRequest import CalculationParamsRequest
-import vortex_induced_vibration
-
-import sys
-sys.path.append('../')
+from vortex_induced_vibration import VortexSimulation
 
 router = APIRouter()
-
-@router.get("/params")
-async def get_params():
-    return {
-        "NX": vortex_induced_vibration.NX,
-        "NY": vortex_induced_vibration.NY,
-        "maxDiameter": vortex_induced_vibration.D_MAX_PHYSICAL,
-        "maxWindSpeed": vortex_induced_vibration.U_MAX_PHYSICAL
-    }
-
 
 @router.post("/params", status_code=status.HTTP_202_ACCEPTED, response_model=None)
 async def set_params(params: CalculationParamsRequest):

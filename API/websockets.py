@@ -24,13 +24,15 @@ async def stream(ws: WebSocket):
             data = json.loads(message)
 
             if data["type"] == "init_params":
-                params:CalculationParamsRequest = data["body"]
-                sim = VortexSimulation(params.cylinderDiameter,
-                                       params.windSpeed,
-                                       params.reynoldsNumber,
-                                       params.reducedVelocity,
-                                       params.massRatio,
-                                       params.dampingRatio)
+                params = CalculationParamsRequest(**data["body"])
+                sim = VortexSimulation(D = params.cylinderDiameter,
+                                       U0 = params.windSpeed,
+                                       RE = params.reynoldsNumber,
+                                       UR = params.reducedVelocity,
+                                       MR = params.massRatio,
+                                       DR = params.dampingRatio,
+                                       NX=params.nx,
+                                       NY=params.ny)
                 break
 
 

@@ -7,6 +7,8 @@ class CalculationParamsRequest(BaseModel):
     windSpeed: float | None = None
     cylinderDiameter: float | None = None
     massRatio: float | None = None
+    nx: int | None = None
+    ny: int | None = None
 
     
 

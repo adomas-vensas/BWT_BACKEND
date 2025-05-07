@@ -15,12 +15,7 @@ import matplotlib as mpl
 
 
 class VortexSimulation:
-    D_MAX_PHYSICAL = 1
-    D_MAX_LATTICE = 15
-    U_MAX_PHYSICAL = 15
-    U_MAX_LATTICE = 0.3
-    
-    def __init__(self, D_PHYSICAL, U_PHYSICAL, RE, UR, MR, DR, PLOT=False):
+    def __init__(self, D, U0, RE, UR, MR, DR, NX, NY, PLOT=False):
         # ===== Plot Settings =====
         self.PLOT = PLOT
         self.PLOT_EVERY = 100
@@ -28,18 +23,16 @@ class VortexSimulation:
 
         # ===== Configuration =====
 
-        self.D_PHYSICAL = D_PHYSICAL
-        self.U_PHYSICAL = U_PHYSICAL
-        self.D = (self.D_MAX_LATTICE * self.D_PHYSICAL) / self.D_MAX_PHYSICAL
-        self.U0 = (self.U_MAX_LATTICE * self.U_PHYSICAL) / self.U_MAX_PHYSICAL
+        self.D = D
+        self.U0 = U0
 
         self.RE = RE
         self.UR = UR
         self.MR = MR
         self.DR = DR
 
-        self.NX = int(20 * self.D)
-        self.NY = int(10 * self.D)
+        self.NX = NX
+        self.NY = NY
 
         self.X_OBJ = self.NX / 2
         self.Y_OBJ = self.NY / 2
@@ -76,7 +69,7 @@ class VortexSimulation:
         self.feq = jnp.zeros((9, self.NX, self.NY), dtype=jnp.float32)
 
         self.d = jnp.zeros((2,), dtype=jnp.float32)
-        self.v = jnp.zeros((2,), dtype=jnp.float32).at(1).set(1e-2)
+        self.v = jnp.zeros((2,), dtype=jnp.float32).at[1].set(1e-2)
         self.a = jnp.zeros((2,), dtype=jnp.float32)
         self.h = jnp.zeros((2,), dtype=jnp.float32)
 
@@ -88,58 +81,79 @@ class VortexSimulation:
             self.setup_plot()
 
 
-    @jax.jit
-    def update(self, f, d, v, a, h):
-   
-        # update new macroscopic
+    @staticmethod
+    def update(
+        f: jnp.ndarray,
+        d: jnp.ndarray,
+        v: jnp.ndarray,
+        a: jnp.ndarray,
+        h: jnp.ndarray,
+        X_MARKERS: jnp.ndarray,
+        Y_MARKERS: jnp.ndarray,
+        N_MARKER: int,
+        L_ARC: float,
+        MRT_COL_LEFT: jnp.ndarray,
+        MRT_SRC_LEFT: jnp.ndarray,
+        N_ITER_MDF: int,
+        IB_START_X: int,
+        IB_START_Y: int,
+        IB_SIZE: int,
+        MASS: float,
+        STIFFNESS: float,
+        DAMPING: float,
+        feq_init: jnp.ndarray,
+        U0: float,
+        D: float,
+        X: jnp.ndarray,
+        Y: jnp.ndarray,
+    ):
+        """
+        JIT-compiled update function for the VortexSimulation class.
+        """
+        # Update macroscopic variables
         rho, u = lbm.get_macroscopic(f)
 
-        
-        # Collision
+        # Collision step
         feq = lbm.get_equilibrium(rho, u)
-        f = mrt.collision(f, feq, self.MRT_COL_LEFT)
-        
-        # update markers position
-        x_markers, y_markers = ib.get_markers_coords_2dof(self.X_MARKERS, self.Y_MARKERS, d)
-        
-        # update ibm regionself.
-        ib_start_x = (self.IB_START_X + d[0]).astype(jnp.int32)
-        ib_start_y = (self.IB_START_Y + d[1]).astype(jnp.int32)
-        
-        # extract data from ibm region
-        u_slice = jax.lax.dynamic_slice(u, (0, ib_start_x, ib_start_y), (2, self.IB_SIZE, self.IB_SIZE))
-        X_slice = jax.lax.dynamic_slice(X, (ib_start_x, ib_start_y), (self.IB_SIZE, self.IB_SIZE))
-        Y_slice = jax.lax.dynamic_slice(Y, (ib_start_x, ib_start_y), (self.IB_SIZE, self.IB_SIZE))
-        f_slice = jax.lax.dynamic_slice(f, (0, ib_start_x, ib_start_y), (9, self.IB_SIZE, self.IB_SIZE))
-        
+        f = mrt.collision(f, feq, MRT_COL_LEFT)
 
-        v_markers = jnp.tile(v.reshape((1, 2)), (self.N_MARKER, 1))
-        # calculate ibm force
-        g_slice, h_markers = ib.multi_direct_forcing(u_slice, X_slice, Y_slice, 
-                                                    v_markers, x_markers, y_markers, self.N_MARKER, self.L_ARC, 
-                                                    self.N_ITER_MDF, ib.kernel_range4)
+        # Marker coordinates update
+        x_markers, y_markers = ib.get_markers_coords_2dof(X_MARKERS, Y_MARKERS, d)
+
+        # Determine slicing start positions
+        ib_start_x = (IB_START_X + d[0]).astype(jnp.int32)
+        ib_start_y = (IB_START_Y + d[1]).astype(jnp.int32)
+
+        # Extract region of interest using IB_SIZE
+        u_slice = jax.lax.dynamic_slice(u, (0, ib_start_x, ib_start_y), (2, IB_SIZE, IB_SIZE))
+        X_slice = jax.lax.dynamic_slice(X, (ib_start_x, ib_start_y), (IB_SIZE, IB_SIZE))
+        Y_slice = jax.lax.dynamic_slice(Y, (ib_start_x, ib_start_y), (IB_SIZE, IB_SIZE))
+        f_slice = jax.lax.dynamic_slice(f, (0, ib_start_x, ib_start_y), (9, IB_SIZE, IB_SIZE))
         
-        # apply the force to the lattice
+        # Apply forcing
+        v_markers = jnp.tile(v.reshape((1, 2)), (N_MARKER, 1))
+        g_slice, h_markers = ib.multi_direct_forcing(
+            u_slice, X_slice, Y_slice, v_markers, x_markers, y_markers, N_MARKER, L_ARC, N_ITER_MDF, ib.kernel_range4
+        )
+
+        # Update force
         g_lattice = lbm.get_discretized_force(g_slice, u_slice)
-        s_slice = mrt.get_source(g_lattice, self.MRT_SRC_LEFT)    
-        # f = dynamic_update_slice(f, f_slice + s_slice, (0, ib_start_x, ib_start_y))
+        s_slice = mrt.get_source(g_lattice, MRT_SRC_LEFT)
         f = jax.lax.dynamic_update_slice(f, f_slice + s_slice, (0, ib_start_x, ib_start_y))
 
-        # apply the force to the cylinder
+        # Apply force to the cylinder
         h = ib.get_force_to_obj(h_markers)
-        # h += a * math.pi * D ** 2 / 4   
-        scale = (math.pi  * D * D) / 4
+        scale = (math.pi * D ** 2) / 4
         h = jnp.add(h, jnp.multiply(a, scale))
-        a, v, d = dyn.newmark_2dof(a, v, d, h, self.MASS, self.STIFFNESS, self.DAMPING)
+        a, v, d = dyn.newmark_2dof(a, v, d, h, MASS, STIFFNESS, DAMPING)
 
-        # Streaming
+        # Streaming and boundary conditions
         f = lbm.streaming(f)
+        f = lbm.boundary_equilibrium(f, feq_init[:, jnp.newaxis], loc='right')
+        f = lbm.velocity_boundary(f, U0, 0, loc='left')
 
-        # Boundary conditions
-        f = lbm.boundary_equilibrium(f, self.feq_init[:,jnp.newaxis], loc='right')
-        f = lbm.velocity_boundary(f, self.U0, 0, loc='left')
-        
         return f, rho, u, d, v, a, h
+
 
 
     def setup_plot(self):
@@ -175,23 +189,36 @@ class VortexSimulation:
 
 # =============== start simulation ===============
 
-def step(self):
-    self.f, self.rho, self.u, self.d, self.v, self.a, self.h = self.update(
-        self.f, self.d, self.v, self.a, self.h
-    )
+    def step(self):
 
-    # if self.PLOT and hasattr(self, "im"):
-    #     self.im.set_data(post.calculate_curl(self.u).T)
-    #     self.im.autoscale()
-    #     self.circle.center = ((self.X_OBJ + self.d[0]) / self.D, self.Y_OBJ / self.D)
-    #     plt.pause(0.01)
-    return self.f, self.rho, self.u, self.d, self.v, self.a, self.h
+        jitted_update = jax.jit(
+            VortexSimulation.update,
+            static_argnums=(7, 8, 11, 12, 13, 14, 15, 16, 17)
+        )
 
+        (self.f, self.rho, self.u, self.d, self.v,
+        self.a, self.h) = jitted_update(
+            # 0–4 dynamic core state
+            self.f, self.d, self.v, self.a, self.h,
+            # 5–6 dynamic marker arrays
+            self.X_MARKERS, self.Y_MARKERS,
+            # 7–8 static
+            self.N_MARKER, self.L_ARC,
+            # 9–10 dynamic MRT arrays
+            self.MRT_COL_LEFT, self.MRT_SRC_LEFT,
+            # 11 static
+            self.N_ITER_MDF,
+            # 12–14 static grid ints
+            self.IB_START_X, self.IB_START_Y, self.IB_SIZE,
+            # 15–17 static floats
+            self.MASS, self.STIFFNESS, self.DAMPING,
+            # 18–22 dynamic arrays/floats
+            self.feq_init, self.U0, self.D, self.X, self.Y
+        )
 
-
-
-
-
-
-
-
+        # if self.PLOT and hasattr(self, "im"):
+        #     self.im.set_data(post.calculate_curl(self.u).T)
+        #     self.im.autoscale()
+        #     self.circle.center = ((self.X_OBJ + self.d[0]) / self.D, self.Y_OBJ / self.D)
+        #     plt.pause(0.01)
+        return self.f, self.rho, self.u, self.d, self.v, self.a, self.h
