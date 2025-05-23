@@ -1,0 +1,10 @@
+services:
+  web:
+    build: .
+    ports:
+      - "7910:7910"
+    environment:
+      PORT: 7910
+      GUNICORN_WORKERS: 2
+    volumes:
+      - ./:/app:cached

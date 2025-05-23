@@ -4,11 +4,9 @@
 # domain and is free to move in both directions with spring constraints. 
 # The flow is driven by a constant velocity U0 in the x direction. 
 
-import os
 import math
 import jax
 import jax.numpy as jnp
-from tqdm import tqdm
 from calculations import dyn, ib, lbm, mrt, post
 import matplotlib.pyplot as plt
 import matplotlib as mpl
@@ -216,9 +214,4 @@ class VortexSimulation:
             self.feq_init, self.U0, self.D, self.X, self.Y
         )
 
-        # if self.PLOT and hasattr(self, "im"):
-        #     self.im.set_data(post.calculate_curl(self.u).T)
-        #     self.im.autoscale()
-        #     self.circle.center = ((self.X_OBJ + self.d[0]) / self.D, self.Y_OBJ / self.D)
-        #     plt.pause(0.01)
         return self.f, self.rho, self.u, self.d, self.v, self.a, self.h
