@@ -8,9 +8,6 @@ import math
 import jax
 import jax.numpy as jnp
 from calculations import dyn, ib, lbm, mrt, post
-import matplotlib.pyplot as plt
-import matplotlib as mpl
-
 
 class VortexSimulation:
     def __init__(self, D, U0, RE, UR, MR, DR, NX, NY, PLOT=False):
@@ -152,38 +149,6 @@ class VortexSimulation:
 
         return f, rho, u, d, v, a, h
 
-
-
-    def setup_plot(self):
-        mpl.rcParams['figure.raise_window'] = False
-        
-        plt.figure(figsize=(8, 4))
-        
-        curl = post.calculate_curl(self.u)
-        im = plt.imshow(
-            curl.T,
-            extent=[0, self.NX / self.D, 0, self.NY / self.D],
-            cmap="seismic",
-            aspect="equal",
-            origin="lower",
-            norm=mpl.colors.CenteredNorm(),
-        )
-
-        plt.colorbar()
-        plt.title(f"velocity {self.U0}; diameter: {self.D}")
-        plt.xlabel("x/D")
-        plt.ylabel("y/D")
-
-        # draw a circle representing the cylinder
-        circle = plt.Circle(((self.X_OBJ + self.d[0]) / self.D, (self.Y_OBJ + self.d[1]) / self.D), 0.5, 
-                            edgecolor='black', linewidth=0.5,
-                            facecolor='white', fill=True)
-        plt.gca().add_artist(circle)
-        
-        # mark the initial position of the cylinder
-        plt.plot((self.X_OBJ + self.d[0]) / self.D, self.Y_OBJ / self.D, marker='+', markersize=10, color='k', linestyle='None', markeredgewidth=0.5)
-        
-        plt.tight_layout()
 
 # =============== start simulation ===============
 
