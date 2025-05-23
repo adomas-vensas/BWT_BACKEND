@@ -1,11 +1,13 @@
+name: Calculation-Service
 services:
   web:
     build: .
     ports:
-      - "7910:7910"
+      - "${PORT}:${PORT}"
     environment:
-      PORT: 7910
       GUNICORN_WORKERS: 2
     volumes:
       - ./:/app:cached
-    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7910", "--reload"]
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "${PORT}", "--reload"]
+    env_file:
+      - .env
